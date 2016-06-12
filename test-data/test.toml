@@ -1,0 +1,11 @@
+api_root = "github.ibm.com/api/v3"
+
+[repos]
+
+[repos."lkgrele/steve"]
+qa_flags = ["qa", "test"]
+qa_user = "leif"
+
+[repos."raul/robot"]
+qa_flags = ["qa"]
+qa_user = "raul"

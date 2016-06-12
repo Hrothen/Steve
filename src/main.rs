@@ -34,8 +34,8 @@ struct ConfigData {
     pub repos: HashMap<String, RepoData>,
 }
 
-fn read_config_file() -> ConfigData {
-    let mut config_file = File::open(".steve").expect("Couldn't open config file");
+fn read_config_file(file_name: &str) -> ConfigData {
+    let mut config_file = File::open(file_name).expect("Couldn't open config file");
     let mut str = String::new();
     config_file.read_to_string(&mut str).expect("Couldn't read config file");
     let toml: Option<ConfigData> = decode_str(&str);
@@ -43,6 +43,18 @@ fn read_config_file() -> ConfigData {
         Some(cfg) => cfg,
         _ => panic!("Couldn't decode config file"),
     }
+}
+
+#[test]
+fn it_reads_toml() {
+    let config_data = read_config_file("test-data/test.toml");
+    assert_eq!(config_data.api_root, "github.ibm.com/api/v3");
+    let steve = config_data.repos.get("lkgrele/steve").unwrap();
+    assert_eq!(steve.qa_user, "leif");
+    assert_eq!(steve.qa_flags, ["qa", "test"]);
+    let raul = config_data.repos.get("raul/robot").unwrap();
+    assert_eq!(raul.qa_user, "raul");
+    assert_eq!(raul.qa_flags, ["qa"]);
 }
 
 
@@ -63,7 +75,7 @@ fn main() {
 }
 
 fn handle_pr(number: u64, commits_url: &str, repository: &str) {
-    let config_data = read_config_file();
+    let config_data = read_config_file(".steve");
     let repo_config = config_data.repos.get(&repository.to_owned());
     let auth_token = env::var_os("STEVE_GITHUB_TOKEN")
         .expect("Missing github token!")
