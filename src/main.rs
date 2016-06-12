@@ -18,8 +18,7 @@ use hyper::header::{Headers, Authorization, Bearer, UserAgent};
 use hubcaps::{Credentials, Github};
 use afterparty::*;
 use serde_json::Value;
-use regex::*;
-use lazy_static::*;
+use regex::Regex;
 use toml::decode_str;
 
 #[derive(RustcEncodable, RustcDecodable)]
@@ -135,7 +134,7 @@ fn update_issue(client: &Client,
     let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
         strs => (strs[0], strs[1]),
     };
-    github.repo(repo_name, owner)
+    let _ = github.repo(repo_name, owner)
         .issue(issue_num)
         .labels()
         .add(config.qa_flags.iter().map(String::as_str).collect());
