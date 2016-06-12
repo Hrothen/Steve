@@ -152,13 +152,28 @@ fn update_issue(client: &Client,
     assert_eq!(res.status, hyper::Ok);
 }
 
+#[test]
+fn it_finds_issue_numbers() {
+    let message = r"This is a commit message
+        needs qa: #72 should get caught
+        needs QA #333 should also get caught
+        but #44 won't, and needs QA: #33 #45
+        only gets #33. Duplicates are discarded:
+        needs qa #72";
+    let mut expected: HashSet<u64> = HashSet::new();
+    expected.insert(72);
+    expected.insert(333);
+    expected.insert(33);
+    let mut numbers: HashSet<u64> = HashSet::new();
+    get_issues(&mut numbers, message);
+    assert_eq!(numbers, expected);
+}
+
 fn get_issues(numbers: &mut HashSet<u64>, message: &str) {
     lazy_static! {
         static ref RE: Regex = Regex::new(r"(?i)needs\sqa:?\s#(\d+)").unwrap();
     }
-    for cap in RE.captures_iter(message) {
-        if let Some(num) = cap.at(1) {
-            numbers.insert(num.parse::<u64>().unwrap());
-        }
+    for num in RE.captures_iter(message).filter_map(|cap| cap.at(1)) {
+        numbers.insert(num.parse::<u64>().unwrap());
     }
 }
