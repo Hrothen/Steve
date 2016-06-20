@@ -62,9 +62,9 @@ fn main() {
     let mut hub = Hub::new();
     hub.handle("pull_request", |delivery: &Delivery| {
         match delivery.payload {
-            Event::PullRequest { number, ref pull_request, ref repository, .. } => {
+            Event::PullRequest { ref pull_request, ref repository, .. } => {
                 if pull_request.merged {
-                    handle_pr(number, &pull_request.commits_url, &repository.full_name)
+                    handle_pr(&pull_request.commits_url, &repository.full_name)
                 }
             }
             _ => (),
@@ -74,7 +74,7 @@ fn main() {
     Server::http("0.0.0.0").unwrap().handle(hub).unwrap();
 }
 
-fn handle_pr(number: u64, commits_url: &str, repository: &str) {
+fn handle_pr(commits_url: &str, repository: &str) {
     let config_data = read_config_file(".steve");
     let repo_config = config_data.repos.get(&repository.to_owned());
     let auth_token = env::var_os("STEVE_GITHUB_TOKEN")
@@ -84,8 +84,7 @@ fn handle_pr(number: u64, commits_url: &str, repository: &str) {
 
     match repo_config {
         Some(config) => {
-            update_issues(number,
-                          &commits_url,
+            update_issues(&commits_url,
                           &auth_token,
                           &config,
                           &config_data.api_root,
@@ -95,8 +94,7 @@ fn handle_pr(number: u64, commits_url: &str, repository: &str) {
     }
 }
 
-fn update_issues(number: u64,
-                 commits_url: &str,
+fn update_issues(commits_url: &str,
                  auth_token: &str,
                  config: &RepoData,
                  api_root: &str,
