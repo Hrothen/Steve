@@ -5,6 +5,7 @@ extern crate hyper;
 extern crate hubcaps;
 extern crate afterparty;
 extern crate serde_json;
+extern crate serde;
 extern crate rustc_serialize;
 extern crate toml;
 
@@ -107,19 +108,51 @@ fn update_issues(number: u64,
     let commits = client.get(commits_url).headers(headers).send().unwrap();
     assert_eq!(commits.status, hyper::Ok); //replace with actual error handling
 
-    let data: Value = serde_json::from_reader(commits).unwrap();
-    let arr = data.as_array().unwrap();
-    let mut issues = HashSet::new();
-    for val in arr {
-        // needs real error handling, shouldn't panic when it gets bad json
-        let message = val.as_object().unwrap().get("message").unwrap().as_string().unwrap();
-        get_issues(&mut issues, &message);
-    }
+    match serde_json::from_reader(commits) {
+        Ok(json) => {
+            match parse_commit_data(&json) {
+                Ok(messages) => {
+                    let mut issues = HashSet::new();
+                    for message in messages {
+                        get_issues(&mut issues, &message)
+                    }
 
-    for issue in issues {
-        update_issue(&client, auth_token, issue, config, &repository, api_root);
+                    for issue in issues {
+                        update_issue(&client, auth_token, issue, config, &repository, api_root);
+                    }
+                }
+                Err(err) => println!("{:?}", err), //should log error
+            }
+        }
+        Err(err) => println!("{:?}", err), //should log error
     }
 }
+
+#[test]
+fn it_parses_commit_data() {
+    let file = File::open("test-data/test-messages.json").expect("Couldn't open message file");
+    let json = serde_json::from_reader(file);
+    assert!(json.is_ok());
+    let json = json.unwrap();
+    let messages = parse_commit_data(&json);
+    assert!(messages.is_ok());
+    let messages = messages.unwrap();
+    assert_eq!(messages[0], "message1");
+    assert_eq!(messages[1], "swordfish");
+}
+
+
+fn parse_commit_data<'a>(json: &'a Value) -> Result<Vec<&'a str>, &str> {
+    let arr = try!(json.as_array().ok_or("expected array as top level object"));
+    arr.iter()
+        .map(|obj| {
+            obj.pointer("/commit/message")
+                .ok_or("missing message field")
+                .and_then(|m| m.as_string().ok_or("message field has wrong type"))
+        })
+        .collect()
+}
+
 
 fn update_issue(client: &Client,
                 auth_token: &str,

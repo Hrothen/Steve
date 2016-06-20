@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Leif Grele <lkgrele@us.ibm.com>"]
 
 [dependencies]
+serde="0.7.0"
 serde_json="0.7.0"
 hubcaps="0.2.2"
 hyper="0.9.0"
