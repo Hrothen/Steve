@@ -8,6 +8,9 @@ extern crate serde_json;
 extern crate serde;
 extern crate rustc_serialize;
 extern crate toml;
+#[macro_use]
+extern crate log;
+extern crate env_logger;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -59,6 +62,8 @@ fn it_reads_toml() {
 
 
 fn main() {
+    env_logger::init().unwrap();
+
     let mut hub = Hub::new();
     hub.handle("pull_request", |delivery: &Delivery| {
         match delivery.payload {
@@ -67,12 +72,21 @@ fn main() {
                     handle_pr(&pull_request.commits_url, &repository.full_name)
                 }
             }
-            _ => (),
+            _ => info!("Recived a request that wasn't a pull-request webhook"),
         }
     });
 
-    Server::http("0.0.0.0").unwrap().handle(hub).unwrap();
+    match Server::http("0.0.0.0:0") {
+        Err(err) => error!("ERROR: failed to start server, the error was: {}", err),
+        Ok(server) => {
+            match server.handle(hub) {
+                Err(err) => error!("ERROR starting handler, the error was: {}", err),
+                Ok(server) => info!("Successfully started server"),
+            }
+        }
+    }
 }
+
 
 fn handle_pr(commits_url: &str, repository: &str) {
     let config_data = read_config_file(".steve");

@@ -12,6 +12,8 @@ regex="0.1.71"
 lazy_static="0.2.1"
 rustc-serialize="0.3"
 toml="0.1"
+log="0.3.6"
+env_logger="0.3.3"
 
 [dependencies.afterparty]
 path="../afterparty"
