@@ -148,10 +148,10 @@ fn update_issues(commits_url: &str,
                         update_issue(&client, auth_token, issue, config, &repository, api_root);
                     }
                 }
-                Err(err) => println!("{:?}", err), //should log error
+                Err(err) => error!("{:?}", err),
             }
         }
-        Err(err) => println!("{:?}", err), //should log error
+        Err(err) => error!("{:?}", err),
     }
 }
 
