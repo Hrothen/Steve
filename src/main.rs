@@ -37,6 +37,40 @@ struct ConfigData {
     pub repos: HashMap<String, RepoData>,
 }
 
+macro_rules! panic_log {
+    ($($arg:tt)*) => ( {
+        error!($($arg)*);
+        panic!()
+    } );
+}
+
+trait ExpectLog {
+    type Item;
+    fn expect_log(self, &str) -> Self::Item;
+}
+
+impl<T> ExpectLog for Option<T> {
+    type Item = T;
+    fn expect_log(self, msg: &str) -> T {
+        match self {
+            None => panic_log!("{}", msg),
+            Some(s) => s,
+        }
+    }
+}
+
+impl<T, E> ExpectLog for Result<T, E>
+    where E: std::fmt::Display
+{
+    type Item = T;
+    fn expect_log(self, msg: &str) -> T {
+        match self {
+            Err(err) => panic_log!("{} {}", msg, err),
+            Ok(s) => s,
+        }
+    }
+}
+
 fn read_config_file(file_name: &str) -> ConfigData {
     let mut config_file = File::open(file_name).expect("Couldn't open config file");
     let mut str = String::new();
