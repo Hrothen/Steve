@@ -72,18 +72,18 @@ impl<T, E> ExpectLog for Result<T, E>
 }
 
 fn read_config_file(file_name: &str) -> ConfigData {
-    let mut config_file = File::open(file_name).expect("Couldn't open config file");
+    let mut config_file = File::open(file_name)
+        .expect_log(&format!("Couldn't open config file {}", file_name));
     let mut str = String::new();
-    config_file.read_to_string(&mut str).expect("Couldn't read config file");
+    config_file.read_to_string(&mut str)
+        .expect_log(&format!("Couldn't read config file {}", file_name));
     let toml: Option<ConfigData> = decode_str(&str);
-    match toml {
-        Some(cfg) => cfg,
-        _ => panic!("Couldn't decode config file"),
-    }
+    toml.expect_log(&format!("Couldn't decode config file {}", file_name))
 }
 
 #[test]
 fn it_reads_toml() {
+    env_logger::init().unwrap();
     let config_data = read_config_file("test-data/test.toml");
     assert_eq!(config_data.api_root, "github.ibm.com/api/v3");
     let steve = config_data.repos.get("lkgrele/steve").unwrap();
