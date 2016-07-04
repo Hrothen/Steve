@@ -249,9 +249,9 @@ fn it_finds_issue_numbers() {
 
 fn get_issues(numbers: &mut HashSet<u64>, message: &str) {
     lazy_static! {
-        static ref RE: Regex = Regex::new(r"(?i)needs\sqa:?\s#(\d+)").unwrap();
+        static ref RE: Regex = Regex::new(r"(?i)needs\sqa:?\s#(\d+)").expect_log("{}");
     }
     for num in RE.captures_iter(message).filter_map(|cap| cap.at(1)) {
-        numbers.insert(num.parse::<u64>().unwrap());
+        numbers.insert(num.parse::<u64>().expect_log("{}"));
     }
 }
