@@ -115,7 +115,7 @@ fn main() {
         Ok(server) => {
             match server.handle(hub) {
                 Err(err) => error!("ERROR starting handler, the error was: {}", err),
-                Ok(server) => info!("Successfully started server"),
+                Ok(_) => info!("Successfully started server"),
             }
         }
     }
