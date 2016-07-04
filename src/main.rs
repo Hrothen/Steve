@@ -124,32 +124,20 @@ fn main() {
 
 fn handle_pr(commits_url: &str, repository: &str) {
     let config_data = read_config_file(".steve");
-    let repo_config = config_data.repos.get(&repository.to_owned());
-    match env::var_os("STEVE_GITHUB_TOKEN") {
-        None => {
-            error!("Missing github token, STEVE_GITHUB_TOKEN is not defined!");
-            panic!()
+    let auth_token = env::var_os("STEVE_GITHUB_TOKEN")
+        .expect_log("Missing github token, STEVE_GITHUB_TOKEN is not defined!")
+        .into_string()
+        .ok()
+        .expect_log("Github token contains illegal characters!");
+    match config_data.repos.get(&repository.to_owned()) {
+        Some(config) => {
+            update_issues(&commits_url,
+                          &auth_token,
+                          &config,
+                          &config_data.api_root,
+                          &repository)
         }
-        Some(tok) => {
-            match tok.into_string() {
-                Err(_) => {
-                    error!("Github token contains illegal characters!");
-                    panic!()
-                }
-                Ok(auth_token) => {
-                    match repo_config {
-                        Some(config) => {
-                            update_issues(&commits_url,
-                                          &auth_token,
-                                          &config,
-                                          &config_data.api_root,
-                                          &repository)
-                        }
-                        None => info!("No config found for repo {}, skipping", repository),
-                    }
-                }
-            }
-        }
+        None => info!("No config found for repo {}, skipping", repository),
     }
 }
 
