@@ -6,7 +6,7 @@ authors = ["Leif Grele <lkgrele@us.ibm.com>"]
 [dependencies]
 serde="0.7.0"
 serde_json="0.7.0"
-hubcaps="0.2.2"
+hubcaps={ git = "https://github.com/Hrothen/hubcaps", branch = "issue-improvement" }
 hyper="0.9.0"
 regex="0.1.71"
 lazy_static="0.2.1"
@@ -15,5 +15,4 @@ toml="0.1"
 log="0.3.6"
 env_logger="0.3.3"
 
-[dependencies.afterparty]
-path="../afterparty"
+afterparty={ git = "https://github.com/Hrothen/afterparty", branch = "hyper-9" }
