@@ -19,7 +19,7 @@ use std::io::Read;
 
 use hyper::{Client, Server, Url};
 use hyper::header::{Headers, Authorization, Bearer, UserAgent};
-use hubcaps::{Credentials, Github};
+use hubcaps::{Credentials, Github, IssueOptions};
 use afterparty::*;
 use serde_json::Value;
 use regex::Regex;
@@ -162,8 +162,47 @@ fn update_issues(commits_url: &str,
                         get_issues(&mut issues, &message)
                     }
 
-                    for issue in issues {
-                        update_issue(&client, auth_token, issue, config, &repository, api_root);
+                    if !issues.is_empty() {
+                        let github = Github::host(api_root,
+                                                  "steve",
+                                                  &client,
+                                                  Credentials::Token(auth_token.to_owned()));
+                        let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
+                            strs => (strs[0], strs[1]),
+                        };
+                        let repo = github.repo(repo_name, owner);
+                        match repo.issues().list(&Default::default()) {
+                            Err(err) => error!("{:?}", err),
+                            Ok(issue_data) => {
+                                for issue in issues {
+                                    if issue_data.len() as u64 <= issue {
+                                        info!("Wanted to update issue #{}, but {} doesn't have an \
+                                               issue with that number",
+                                              issue,
+                                              repository)
+                                    } else {
+                                        let ref current_flags = issue_data[issue as usize].labels;
+                                        let new_flags: Vec<String> = current_flags.into_iter()
+                                            .map(|l| l.name.clone())
+                                            .chain(config.qa_flags.clone().into_iter())
+                                            .collect();
+                                        let issue_options =
+                                            IssueOptions::new::<String,
+                                                                String,
+                                                                String,
+                                                                String>(None,
+                                                                        None,
+                                                                        Some(config.qa_user
+                                                                            .clone()),
+                                                                        None,
+                                                                        Some(new_flags));
+                                        if let Err(err) = repo.issue(issue).edit(&issue_options) {
+                                            error!("{:?}", err)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Err(err) => error!("{:?}", err),
