@@ -14,6 +14,7 @@ extern crate env_logger;
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::fmt::Debug;
 use std::env;
 use std::io::Read;
 
@@ -153,35 +154,20 @@ fn handle_pr(commits_url: &str, repository: &str) {
     }
 }
 
-fn get_with_retries(client: &Client,
-                    url: &str,
-                    headers: &Headers,
-                    max_retries: u64)
-                    -> Result<Response, String> {
-    for i in 1..max_retries {
-        let retry_headers = headers.clone();
-        match client.get(url).headers(retry_headers).send() {
-            Ok(result) => {
-                if result.status == hyper::Ok {
-                    return Ok(result);
-                } else {
-                    if i < max_retries {
-                        info!("http response {:?}, retrying", result.status_raw());
-                    } else {
-                        return Err(format!("http error {:?}", result.status_raw()));
-                    }
-                }
-            }
-            Err(err) => {
-                if i < max_retries {
-                    error!("Hyper error {}, retrying anyway", err)
-                } else {
-                    return Err(format!("Hyper error {}", err));
-                }
-            }
+fn do_retry<F, R, E>(func: F, max_retries: u64) -> Result<R, E>
+    where F: Fn() -> Result<R, E>,
+          R: Debug,
+          E: Debug
+{
+    for _ in 1..(max_retries - 1) {
+        let result = func();
+        if result.is_ok() {
+            return result;
+        } else {
+            info!("{:?}", result.unwrap_err())
         }
     }
-    unreachable!();
+    return func();
 }
 
 fn update_issues(commits_url: &str,
@@ -196,10 +182,11 @@ fn update_issues(commits_url: &str,
     let retries = env_or("STEVE_MAX_RETRIES", "5")
         .parse::<u64>()
         .expect_log("max retries need to be an integer");
-    let commits = match get_with_retries(&client, &commits_url, &headers, retries) {
+    let commits = match do_retry(|| client.get(commits_url).headers(headers.clone()).send(),
+                                 retries) {
         Ok(c) => c,
         Err(err) => {
-            error!("Failed to get commits, error {}", err);
+            error!("Failed to get commits, error {:?}", err);
             return ();
         }
     };
@@ -222,7 +209,7 @@ fn update_issues(commits_url: &str,
                             strs => (strs[0], strs[1]),
                         };
                         let repo = github.repo(repo_name, owner);
-                        match repo.issues().list(&Default::default()) {
+                        match do_retry(|| repo.issues().list(&Default::default()), retries) {
                             Err(err) => error!("{:?}", err),
                             Ok(issue_data) => {
                                 for issue in issues {
@@ -247,7 +234,11 @@ fn update_issues(commits_url: &str,
                                                                             .clone()),
                                                                         None,
                                                                         Some(new_flags));
-                                        if let Err(err) = repo.issue(issue).edit(&issue_options) {
+                                        if let Err(err) = do_retry(|| {
+                                                                       repo.issue(issue)
+                                                                           .edit(&issue_options)
+                                                                   },
+                                                                   retries) {
                                             error!("{:?}", err)
                                         }
                                     }
