@@ -19,6 +19,7 @@ use std::io::Read;
 
 use hyper::{Client, Server, Url};
 use hyper::header::{Headers, Authorization, Bearer, UserAgent};
+use hyper::client::Response;
 use hubcaps::{Credentials, Github, IssueOptions};
 use afterparty::*;
 use serde_json::Value;
@@ -152,6 +153,37 @@ fn handle_pr(commits_url: &str, repository: &str) {
     }
 }
 
+fn get_with_retries(client: &Client,
+                    url: &str,
+                    headers: &Headers,
+                    max_retries: u64)
+                    -> Result<Response, String> {
+    for i in 1..max_retries {
+        let retry_headers = headers.clone();
+        match client.get(url).headers(retry_headers).send() {
+            Ok(result) => {
+                if result.status == hyper::Ok {
+                    return Ok(result);
+                } else {
+                    if i < max_retries {
+                        info!("http response {:?}, retrying", result.status_raw());
+                    } else {
+                        return Err(format!("http error {:?}", result.status_raw()));
+                    }
+                }
+            }
+            Err(err) => {
+                if i < max_retries {
+                    error!("Hyper error {}, retrying anyway", err)
+                } else {
+                    return Err(format!("Hyper error {}", err));
+                }
+            }
+        }
+    }
+    unreachable!();
+}
+
 fn update_issues(commits_url: &str,
                  auth_token: &str,
                  config: &RepoData,
@@ -161,8 +193,16 @@ fn update_issues(commits_url: &str,
     let mut headers = Headers::new();
     headers.set(Authorization(Bearer { token: auth_token.to_owned() }));
     headers.set(UserAgent("steve".to_owned()));
-    let commits = client.get(commits_url).headers(headers).send().unwrap();
-    assert_eq!(commits.status, hyper::Ok); //replace with actual error handling
+    let retries = env_or("STEVE_MAX_RETRIES", "5")
+        .parse::<u64>()
+        .expect_log("max retries need to be an integer");
+    let commits = match get_with_retries(&client, &commits_url, &headers, retries) {
+        Ok(c) => c,
+        Err(err) => {
+            error!("Failed to get commits, error {}", err);
+            return ();
+        }
+    };
 
     match serde_json::from_reader(commits) {
         Ok(json) => {
