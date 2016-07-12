@@ -110,7 +110,9 @@ fn main() {
         }
     });
 
-    match Server::http("0.0.0.0:0") {
+    let ip_and_port = get_ip_and_port();
+
+    match Server::http(ip_and_port.as_str()) {
         Err(err) => error!("ERROR: failed to start server, the error was: {}", err),
         Ok(server) => {
             match server.handle(hub) {
@@ -121,6 +123,15 @@ fn main() {
     }
 }
 
+fn env_or(name: &str, def: &str) -> String {
+    env::var_os(name).and_then(|v| v.into_string().ok()).unwrap_or(def.to_owned())
+}
+
+fn get_ip_and_port() -> String {
+    let ip = env_or("STEVE_IP", "0.0.0.0");
+    let port = env_or("STEVE_PORT", "80");
+    format!("{}:{}", ip, port)
+}
 
 fn handle_pr(commits_url: &str, repository: &str) {
     let config_data = read_config_file(".steve");
