@@ -12,6 +12,9 @@ extern crate toml;
 extern crate log;
 extern crate env_logger;
 
+mod error;
+use error::SteveError;
+
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::fmt::Debug;
@@ -20,7 +23,6 @@ use std::io::Read;
 
 use hyper::{Client, Server, Url};
 use hyper::header::{Headers, Authorization, Bearer, UserAgent};
-use hyper::client::Response;
 use hubcaps::{Credentials, Github, IssueOptions};
 use afterparty::*;
 use serde_json::Value;
@@ -144,11 +146,13 @@ fn handle_pr(commits_url: &str, repository: &str) {
         .expect_log("Github token contains illegal characters!");
     match config_data.repos.get(&repository.to_owned()) {
         Some(config) => {
-            update_issues(&commits_url,
-                          &auth_token,
-                          &config,
-                          &config_data.api_root,
-                          &repository)
+            let _ = update_issues::<String>(&commits_url,
+                                            &auth_token,
+                                            &config,
+                                            &config_data.api_root,
+                                            &repository)
+                .map_err(|err| error!("{:?}", err));
+            return ();
         }
         None => info!("No config found for repo {}, skipping", repository),
     }
@@ -170,11 +174,12 @@ fn do_retry<F, R, E>(func: F, max_retries: u64) -> Result<R, E>
     return func();
 }
 
-fn update_issues(commits_url: &str,
-                 auth_token: &str,
-                 config: &RepoData,
-                 api_root: &str,
-                 repository: &str) {
+fn update_issues<E>(commits_url: &str,
+                    auth_token: &str,
+                    config: &RepoData,
+                    api_root: &str,
+                    repository: &str)
+                    -> Result<(), SteveError> {
     let client = Client::new();
     let mut headers = Headers::new();
     headers.set(Authorization(Bearer { token: auth_token.to_owned() }));
@@ -182,76 +187,53 @@ fn update_issues(commits_url: &str,
     let retries = env_or("STEVE_MAX_RETRIES", "5")
         .parse::<u64>()
         .expect_log("max retries need to be an integer");
-    let commits = match do_retry(|| client.get(commits_url).headers(headers.clone()).send(),
-                                 retries) {
-        Ok(c) => c,
-        Err(err) => {
-            error!("Failed to get commits, error {:?}", err);
-            return ();
-        }
-    };
+    let commits = try!(do_retry(|| client.get(commits_url).headers(headers.clone()).send(),
+                                retries));
 
-    match serde_json::from_reader(commits) {
-        Ok(json) => {
-            match parse_commit_data(&json) {
-                Ok(messages) => {
-                    let mut issues = HashSet::new();
-                    for message in messages {
-                        get_issues(&mut issues, &message)
-                    }
+    let json = try!(serde_json::from_reader(commits));
+    let messages = try!(parse_commit_data(&json));
+    let mut issues = HashSet::new();
+    for message in messages {
+        get_issues(&mut issues, &message)
+    }
 
-                    if !issues.is_empty() {
-                        let github = Github::host(api_root,
-                                                  "steve",
-                                                  &client,
-                                                  Credentials::Token(auth_token.to_owned()));
-                        let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
-                            strs => (strs[0], strs[1]),
-                        };
-                        let repo = github.repo(repo_name, owner);
-                        match do_retry(|| repo.issues().list(&Default::default()), retries) {
-                            Err(err) => error!("{:?}", err),
-                            Ok(issue_data) => {
-                                for issue in issues {
-                                    if issue_data.len() as u64 <= issue {
-                                        info!("Wanted to update issue #{}, but {} doesn't have an \
-                                               issue with that number",
-                                              issue,
-                                              repository)
-                                    } else {
-                                        let ref current_flags = issue_data[issue as usize].labels;
-                                        let new_flags: Vec<String> = current_flags.into_iter()
-                                            .map(|l| l.name.clone())
-                                            .chain(config.qa_flags.clone().into_iter())
-                                            .collect();
-                                        let issue_options =
-                                            IssueOptions::new::<String,
-                                                                String,
-                                                                String,
-                                                                String>(None,
+    if !issues.is_empty() {
+        let github = Github::host(api_root,
+                                  "steve",
+                                  &client,
+                                  Credentials::Token(auth_token.to_owned()));
+        let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
+            strs => (strs[0], strs[1]),
+        };
+        let repo = github.repo(repo_name, owner);
+        let issue_data = try!(do_retry(|| repo.issues().list(&Default::default()), retries));
+        for issue in issues {
+            if issue_data.len() as u64 <= issue {
+                info!("Wanted to update issue #{}, but {} doesn't have an issue with that number",
+                      issue,
+                      repository)
+            } else {
+                let ref current_flags = issue_data[issue as usize].labels;
+                let new_flags: Vec<String> = current_flags.into_iter()
+                    .map(|l| l.name.clone())
+                    .chain(config.qa_flags.clone().into_iter())
+                    .collect();
+                let issue_options =
+                    IssueOptions::new::<String, String, String, String>(None,
                                                                         None,
                                                                         Some(config.qa_user
                                                                             .clone()),
                                                                         None,
                                                                         Some(new_flags));
-                                        if let Err(err) = do_retry(|| {
-                                                                       repo.issue(issue)
-                                                                           .edit(&issue_options)
-                                                                   },
-                                                                   retries) {
-                                            error!("{:?}", err)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(err) => error!("{:?}", err),
+                try!(do_retry(|| {
+                                  repo.issue(issue)
+                                      .edit(&issue_options)
+                              },
+                              retries));
             }
         }
-        Err(err) => error!("{:?}", err),
     }
+    return Ok(());
 }
 
 #[test]
@@ -268,13 +250,14 @@ fn it_parses_commit_data() {
 }
 
 
-fn parse_commit_data<'a>(json: &'a Value) -> Result<Vec<&'a str>, &str> {
+fn parse_commit_data<'a>(json: &'a Value) -> Result<Vec<&'a str>, String> {
     let arr = try!(json.as_array().ok_or("expected array as top level object"));
     arr.iter()
         .map(|obj| {
             obj.pointer("/commit/message")
                 .ok_or("missing message field")
                 .and_then(|m| m.as_string().ok_or("message field has wrong type"))
+                .map_err(|s| s.to_owned())
         })
         .collect()
 }
