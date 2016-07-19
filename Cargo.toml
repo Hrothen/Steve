@@ -14,5 +14,3 @@ rustc-serialize="0.3"
 toml="0.1"
 log="0.3.6"
 env_logger="0.3.3"
-
-afterparty={ git = "https://github.com/Hrothen/afterparty", branch = "hyper-9" }

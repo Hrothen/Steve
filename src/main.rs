@@ -1,9 +1,9 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
+#[macro_use]
 extern crate hyper;
 extern crate hubcaps;
-extern crate afterparty;
 extern crate serde_json;
 extern crate serde;
 extern crate rustc_serialize;
@@ -15,6 +15,9 @@ extern crate env_logger;
 mod error;
 use error::SteveError;
 
+mod github;
+use github::{PullRequestHook, XGithubEvent};
+
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::fmt::Debug;
@@ -23,8 +26,8 @@ use std::io::Read;
 
 use hyper::{Client, Server, Url};
 use hyper::header::{Headers, Authorization, Bearer, UserAgent};
+use hyper::server::{Request, Response};
 use hubcaps::{Credentials, Github, IssueOptions};
-use afterparty::*;
 use serde_json::Value;
 use regex::Regex;
 use toml::decode_str;
@@ -75,6 +78,7 @@ impl<T, E> ExpectLog for Result<T, E>
     }
 }
 
+
 fn read_config_file(file_name: &str) -> ConfigData {
     let mut config_file = File::open(file_name)
         .expect_log(&format!("Couldn't open config file {}", file_name));
@@ -99,27 +103,31 @@ fn it_reads_toml() {
 }
 
 
+fn pr_handler(request: Request, _: Response) {
+    let headers = request.headers.clone();
+    if let Some(&XGithubEvent(ref event)) = headers.get::<XGithubEvent>() {
+        if event == "pull_request" {
+            let res = PullRequestHook::from_request(request).map(|pr| {
+                pr.run(|&PullRequestHook { ref commits_url, ref owner, ref repo, .. }| {
+                    handle_pr(commits_url, repo, owner)
+                })
+            });
+            if res.is_err() {
+                error!("Error decoding pull request webhook: {:?}", res.err())
+            }
+        }
+    }
+    return ();
+}
 fn main() {
     env_logger::init().unwrap();
-
-    let mut hub = Hub::new();
-    hub.handle("pull_request", |delivery: &Delivery| {
-        match delivery.payload {
-            Event::PullRequest { ref pull_request, ref repository, .. } => {
-                if pull_request.merged {
-                    handle_pr(&pull_request.commits_url, &repository.full_name)
-                }
-            }
-            _ => info!("Recived a request that wasn't a pull-request webhook"),
-        }
-    });
 
     let ip_and_port = get_ip_and_port();
 
     match Server::http(ip_and_port.as_str()) {
         Err(err) => error!("ERROR: failed to start server, the error was: {}", err),
         Ok(server) => {
-            match server.handle(hub) {
+            match server.handle(pr_handler) {
                 Err(err) => error!("ERROR starting handler, the error was: {}", err),
                 Ok(_) => info!("Successfully started server"),
             }
@@ -137,20 +145,22 @@ fn get_ip_and_port() -> String {
     format!("{}:{}", ip, port)
 }
 
-fn handle_pr(commits_url: &str, repository: &str) {
+fn handle_pr(commits_url: &hyper::Url, repo: &str, owner: &str) {
     let config_data = read_config_file(".steve");
     let auth_token = env::var_os("STEVE_GITHUB_TOKEN")
         .expect_log("Missing github token, STEVE_GITHUB_TOKEN is not defined!")
         .into_string()
         .ok()
         .expect_log("Github token contains illegal characters!");
-    match config_data.repos.get(&repository.to_owned()) {
+    let repository = format!("{}/{}", repo, owner);
+    match config_data.repos.get(&repository) {
         Some(config) => {
             let _ = update_issues::<String>(&commits_url,
                                             &auth_token,
                                             &config,
                                             &config_data.api_root,
-                                            &repository)
+                                            &repo,
+                                            &owner)
                 .map_err(|err| error!("{:?}", err));
             return ();
         }
@@ -174,11 +184,12 @@ fn do_retry<F, R, E>(func: F, max_retries: u64) -> Result<R, E>
     return func();
 }
 
-fn update_issues<E>(commits_url: &str,
+fn update_issues<E>(commits_url: &hyper::Url,
                     auth_token: &str,
                     config: &RepoData,
                     api_root: &str,
-                    repository: &str)
+                    repo_name: &str,
+                    owner: &str)
                     -> Result<(), SteveError> {
     let client = Client::new();
     let mut headers = Headers::new();
@@ -187,8 +198,9 @@ fn update_issues<E>(commits_url: &str,
     let retries = env_or("STEVE_MAX_RETRIES", "5")
         .parse::<u64>()
         .expect_log("max retries need to be an integer");
-    let commits = try!(do_retry(|| client.get(commits_url).headers(headers.clone()).send(),
-                                retries));
+    let commits =
+        try!(do_retry(|| client.get(commits_url.clone()).headers(headers.clone()).send(),
+                      retries));
 
     let json = try!(serde_json::from_reader(commits));
     let messages = try!(parse_commit_data(&json));
@@ -202,16 +214,15 @@ fn update_issues<E>(commits_url: &str,
                                   "steve",
                                   &client,
                                   Credentials::Token(auth_token.to_owned()));
-        let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
-            strs => (strs[0], strs[1]),
-        };
         let repo = github.repo(repo_name, owner);
         let issue_data = try!(do_retry(|| repo.issues().list(&Default::default()), retries));
         for issue in issues {
             if issue_data.len() as u64 <= issue {
-                info!("Wanted to update issue #{}, but {} doesn't have an issue with that number",
+                info!("Wanted to update issue #{}, but {}/{} doesn't have an issue with that \
+                       number",
                       issue,
-                      repository)
+                      owner,
+                      repo_name)
             } else {
                 let ref current_flags = issue_data[issue as usize].labels;
                 let new_flags: Vec<String> = current_flags.into_iter()

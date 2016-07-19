@@ -49,3 +49,9 @@ impl From<String> for SteveError {
         SteveError { error_message: err }
     }
 }
+
+impl From<&'static str> for SteveError {
+    fn from(err: &str) -> Self {
+        SteveError { error_message: err.to_owned() }
+    }
+}
