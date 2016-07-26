@@ -24,7 +24,7 @@ use std::fmt::Debug;
 use std::env;
 use std::io::Read;
 
-use hyper::{Client, Server, Url};
+use hyper::{Client, Server};
 use hyper::header::{Headers, Authorization, Bearer, UserAgent};
 use hyper::server::{Request, Response};
 use hubcaps::{Credentials, Github, IssueOptions};
@@ -273,37 +273,6 @@ fn parse_commit_data<'a>(json: &'a Value) -> Result<Vec<&'a str>, String> {
         .collect()
 }
 
-
-fn update_issue(client: &Client,
-                auth_token: &str,
-                issue_num: u64,
-                config: &RepoData,
-                repository: &str,
-                api_root: &str) {
-    let github = Github::host(api_root,
-                              "steve",
-                              client,
-                              Credentials::Token(auth_token.to_owned()));
-    let (owner, repo_name) = match repository.split("/").collect::<Vec<_>>() {
-        strs => (strs[0], strs[1]),
-    };
-    let _ = github.repo(repo_name, owner)
-        .issue(issue_num)
-        .labels()
-        .add(config.qa_flags.iter().map(String::as_str).collect());
-    let mut headers = Headers::new();
-    headers.set(Authorization(Bearer { token: auth_token.to_owned() }));
-    headers.set(UserAgent("steve".to_owned()));
-    let update_json = format!("{{\"assignee\":\"{}\"}}", config.qa_user);
-    let url = Url::parse(&format!("{}/repos/{}/issues/{}", api_root, repository, issue_num))
-        .expect("bad url");
-    let res = client.patch(url)
-        .body(&update_json)
-        .headers(headers.to_owned())
-        .send()
-        .unwrap();
-    assert_eq!(res.status, hyper::Ok);
-}
 
 #[test]
 fn it_finds_issue_numbers() {
